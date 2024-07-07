@@ -1,0 +1,275 @@
+---
+title: "forêt_alea"
+format: docx
+editor: visual
+---
+
+# Modèle de prédiction de forêt aléatoire
+
+Le modèle de forêt aléatoire est modèle de classification construit à partir de plusieurs de décision.
+
+C'est un modèle d'agrégation de plusieurs arbres.
+
+## Problématique
+
+Nous voulons prédire la survie d'un d'individu aléatoire dans la base de données. Cependant le modèle pose essentiellemt deux problèmes: quel est et comment déterminer le nombre d'arbres? Et ensuite quelles variables choisir pour le modèle?
+
+Nous allons débuter par un modèle de régression logistique et terminer la construction du modèle de forêt aléatoire.
+
+```{r}
+#| echo: false
+library(readr)
+base_foret<-read.csv("C:/Users/HP X36O/Desktop/Le coinstat/Base_R/code_R/R_Pour_La_Datascience/Jour6/titanic.csv",sep=',',header = T)
+
+```
+
+C'est une base de 12 variables et 891 observations.
+
+Vérification des valeurs manquantes
+
+```{r}
+#| echo: false
+val_m<- data.frame(colSums(is.na(base_foret)))
+val_m
+```
+
+```{r}
+#| echo: false
+base_foret$Age[is.na(base_foret$Age)] <- mean(base_foret$Age, na.rm=T)
+```
+
+```{r}
+#| echo: false
+stats_fonction<- function(Base_jointe){
+  resultat<- data.frame(Nom_variable=character(1),min=numeric(1),max=numeric(1),moyenne=numeric(1),variance=numeric(1))
+  for (variable in names(Base_jointe)) {
+    if(is.numeric(Base_jointe[[variable]])){
+    min<-min(Base_jointe[[variable]],na.rm = T)
+    max<-max(Base_jointe[[variable]],na.rm = T)
+    moyenne<-mean(Base_jointe[[variable]],na.rm = T)
+    variance<-var(Base_jointe[[variable]],na.rm = T)
+    resultat[nrow(resultat)+1,]<-cbind(variable, min, max, moyenne,variance)
+  }
+}
+  return(resultat)
+}
+stats_fonction(base_foret)
+```
+
+Transformation des variables en facteurs
+
+```{r}
+#| echo: false
+base_foret$Survived<-as.factor(base_foret$Survived)
+base_foret$Sex<-as.factor(base_foret$Sex)
+base_foret$Pclass<-as.factor(base_foret$Pclass)
+```
+
+## Partitionnement de la base de données
+
+On partitionne avec 70% de la base d'essaie et 30% de la base de test
+
+```{r}
+#| echo: false
+library(caret)
+set.seed(100)
+index<-createDataPartition(base_foret$Survived,p=0.7,list=F)
+base_train<-base_foret[index,]
+base_test<-base_foret[-index,]
+```
+
+## Régression logistique
+
+```{r}
+#| echo: false
+model_logistique<-glm(Survived~Pclass+Sex+Age+SibSp+Parch+Fare,family=binomial,data=base_train)
+summary(model_logistique)
+```
+
+**Evaluation globale du modèle par le test du rapport de vraissemblance**
+
+```{r}
+#| echo: false
+library(lmtest)
+lrtest(model_logistique)
+```
+
+**le R de mac Fadden**
+
+```{r}
+#| echo: false
+# Calculer les déviations nulles et proposées
+ll.null <- model_logistique$null.deviance / -2
+ll.proposed <- model_logistique$deviance / -2
+
+# Calculer le pseudo R-carré de McFadden
+pseudo_r_squared_mcfadden <- 1 - (ll.proposed / ll.null)
+
+# Afficher le pseudo R-carré de McFadden
+print(pseudo_r_squared_mcfadden)
+
+```
+
+**Les odds ratios**
+
+```{r}
+#| echo: false
+# Obtenir les coefficients estimés du modèle
+coefficients <- coef(model_logistique)
+
+# Calculer les rapports de cotes en exponentiant les coefficients
+odds_ratios <- exp(coefficients)
+
+# Créer un tableau avec les noms des variables et leurs rapports de cotes
+variables <- names(coefficients)
+tableau_odds_ratios <- data.frame(Variable = variables, OddsRatio = odds_ratios)
+
+# Afficher le tableau des rapports de cotes
+tableau_odds_ratios
+
+```
+
+**Les prédictions du modèle**
+
+```{r}
+#| echo: false
+library(pROC)
+library(caret)
+prediction_train<-predict(model_logistique,base_train,type="response")
+roc_train <- roc(response = base_train$Survived, predictor = prediction_train, levels=c("0","1"))
+prediction_test<- predict(model_logistique,newdata=base_test,type="response")
+roc_test <- roc(response = base_test$Survived, predictor = prediction_test, levels=c("0","1"))
+
+```
+
+```{r}
+#| echo: false
+par(mfrow=c(1,2))
+plot(roc_train,main="La courbe ROC de la base d'entrainement")
+plot(roc_test,main="La courbe ROC de la base d'essaie",col="red")
+```
+
+**Calcul de l'AUC**
+
+```{r}
+#| echo: false
+auc_train <- auc(roc_train)
+auc_test <- auc(roc_test)
+
+auc_table <- data.frame(Base = c("Entraînement", "Test"), AUC = c(auc_train, auc_test))
+
+print(auc_table)
+
+```
+
+**La matrice de confusion**
+
+```{r}
+#| echo: false
+# Prédire les classes en utilisant un seuil de probabilité de 0.5 pour la base d'entraînement
+seuil <- 0.5
+predictions_train <- ifelse(prediction_train >= seuil, 1, 0)
+predictions_train <- factor(predictions_train, levels = c(0, 1))
+
+```
+
+```{r}
+#| echo: false
+# Créer la matrice de confusion pour la base d'entraînement
+confusion_matrix_train <- confusionMatrix(predictions_train, base_train$Survived)
+```
+
+```{r}
+#| echo: false
+# Prédire les classes en utilisant un seuil de probabilité de 0.5 pour la base de test
+predictions_test <- ifelse(prediction_test>= seuil, 1, 0)
+predictions_test <- factor(predictions_test, levels = c(0, 1))
+# Créer la matrice de confusion pour la base de test
+confusion_matrix_test <- confusionMatrix(predictions_test, base_test$Survived)
+```
+
+```{r}
+#| echo: false
+# Afficher les matrices de confusion
+confusion_matrix_train
+confusion_matrix_test
+```
+
+## La construction du modèle de forêt aléatoire
+
+```{r}
+#| echo: false
+library(random)
+library(randomForest)
+library(caret)
+```
+
+```{r}
+model_foret<-randomForest(Survived~Pclass+Sex+Age+SibSp+Parch+Fare,data=base_train,importance=TRUE,ntree=500)
+model_foret
+summary(model_foret)
+```
+
+Les coefficients des variables contribuant plus au modèle
+
+```{r}
+#| echo: false
+varImp(model_foret)
+```
+
+Le graphe des variavles contribuant plus au modèle
+
+```{r}
+#| echo: false
+varImpPlot(model_foret)
+```
+
+```{r}
+#| echo: false
+plot(model_foret)
+```
+
+## La prédiction du modèle
+
+```{r}
+#| echo: false
+prediction_train_f<-predict(model_foret,base_train,type="response")
+prediction_test_f<-predict(model_foret,newdata=base_test[,-1],type="response")
+```
+
+```{r}
+#| echo: false
+if (!is.numeric(prediction_train_f)) {
+  prediction_train_f <- as.numeric(as.character(prediction_train_f))
+}
+
+if (!is.numeric(prediction_test_f)) {
+  prediction_test_f <- as.numeric(as.character(prediction_test_f))
+}
+
+```
+
+```{r}
+#| echo: false
+roc_train_f <- roc(response = base_train$Survived, predictor = prediction_train_f, levels=c("0","1"))
+roc_test_f <- roc(response = base_test$Survived, predictor = prediction_test_f, levels=c("0","1"))
+```
+
+**La courbe de ROC**
+
+```{r}
+#| echo: false
+par(mfrow=c(1,2))
+plot(roc_train_f,main="La courbe ROC de la base d'entrainement")
+plot(roc_test_f,main="La courbe ROC de la base d'essaie",col="red")
+```
+
+```{r}
+#| echo: false
+auc_train_f<- auc(roc_train_f)
+auc_test_f<- auc(roc_test_f)
+
+auc_table_f <- data.frame(Base = c("Entraînement", "Test"), AUC = c(auc_train_f, auc_test_f))
+
+print(auc_table_f)
+```
