@@ -1,0 +1,417 @@
+---
+title: "Kmeans"
+format: html
+editor: visual
+---
+
+```{r}
+#| echo: false
+library(readr)
+library(dplyr)
+library(tidyr)
+library(naniar)
+library(ggplot2)
+library(corrplot)
+library(FactoMineR)  # Pour l'ACP
+library(factoextra)  # Pour la visualisation de l'ACP
+```
+
+## Modélisation par K-Means
+
+La méthode **K-Means** est un algorithme de **clustering** non supervisé largement utilisé en apprentissage automatique pour regrouper des observations similaires en fonction de leurs caractéristiques. Voici une définition détaillée de la méthode K-Means et son fonctionnement :
+
+### I. Définition de K-Means
+
+L'algorithme **K-Means** vise à partitionner un ensemble de données en **K clusters (groupes)** de sorte que chaque observation appartienne au cluster le plus proche, basé sur la moyenne des caractéristiques des données dans ce cluster (appelée **centroïde**). Le but est de minimiser la somme des carrés des **distances entre chaque point de données et le centroïde de son cluster.**
+
+### Fonctionnement de l'Algorithme K-Means
+
+#### 1.Choix du nombre de clusters (K) :
+
+-   Déterminez le nombre de clusters souhaités, K. Ce choix peut être basé sur des connaissances préalables ou des méthodes heuristiques comme la méthode de l'Elbow ou la silhouette.
+
+#### 2. Initialisation des Centroides :
+
+-   K points (appelés centroides) sont initialement placés aléatoirement dans l'espace de données. Ces points peuvent être des observations de données ou générés aléatoirement.
+
+### 3. Affectation des Points aux Clusters les Plus Proches :
+
+-   Chaque observation est affectée au cluster dont le centroïde est le plus proche, en utilisant une mesure de distance, typiquement la distance euclidienne.
+
+#### 4. Recalcul des Centroides :
+
+-   Une fois que tous les points ont été affectés, les centroïdes de chaque cluster sont recalculés comme la moyenne des observations dans chaque cluster.
+
+#### 5. Répétition des Étapes 3 et 4 :
+
+-   Les étapes d'affectation et de recalcul des centroides sont répétées jusqu'à ce qu'une convergence soit atteinte (c'est-à-dire que les points ne changent plus de cluster ou que les centroides ne bougent plus de manière significative).
+
+#### 6. Critère d'Arrêt :
+
+-   L'algorithme s'arrête lorsqu'il atteint un nombre fixe d'itérations ou lorsque le déplacement des centroides entre deux itérations est inférieur à un certain seuil.
+
+### Avantages de K-Means
+
+**- Simplicité et Rapidité :** L'algorithme est facile à comprendre et rapide à exécuter, surtout pour des petits jeux de données.
+
+**- Efficace sur des Données de Grande Taille :** K-Means fonctionne bien sur des jeux de données de grande taille.
+
+**- Flexibilité :** Adaptable à différentes formes de données et problèmes.
+
+### Inconvénients de K-Means
+
+**- Sensibilité à la Valeur de K** : Le choix du nombre de clusters K peut affecter fortement les résultats.
+
+**- Sensibilité aux Points Anormaux (Outliers) :** Les outliers peuvent fausser les résultats car K-Means utilise la moyenne pour recalculer les centroides.
+
+**- Clusters Circulaires et de Taille Égale :** K-Means suppose que les clusters sont circulaires et de taille relativement égale, ce qui n'est pas toujours le cas.
+
+### Applications de K-Means
+
+**- Segmentation des Clients** : En marketing, pour regrouper des clients ayant des comportements d'achat similaires.
+
+**- Analyse d'Images :** Pour la compression d'images ou la segmentation d'images.
+
+**- Analyse Génomique :** Pour regrouper des gènes ayant des expressions similaires.
+
+**- Détection d'Anomalies :** En tant que prétraitement pour identifier des outliers dans des ensembles de données.
+
+### II. Importation des données
+
+La base de donnée s'appelle et disponible sur le site [**UCI Machine Learning Repository**](Wholesale%20customers%20-%20UCI%20Machine%20Learning%20Repository)Elle se réfère aux clients d'un distributeur en gros. Elle inclut les dépenses annuelles en unités monétaires (m.u.) sur diverses catégories de produits.
+
+```{r}
+#| echo: false
+data <-read.csv("C:/Users/HP X36O/Documents/KMEANS/Base/Wholesale customers data.csv", sep=",",header = TRUE)
+```
+
+```{r}
+#| echo: false
+## Renommer les variables de la base de données
+data <- data %>%
+  rename(prodfrais = Fresh,
+         prodlait = Milk,
+         prodepicerie = Grocery,
+         prodsurgele = Frozen,
+         proddetergents = Detergents_Paper,
+         prodchacuterie = Delicassen,
+         canal = Channel)
+        
+head(data)
+```
+
+#### Description de la base de donnée :
+
+La base contient 440 observations et 8 variables. Les variables portent sur les caractérisitiques des clients d'une entreprise au portugal. Les variables sont décrites dans la suite:
+
+1.  **canal** : Canal des clients - Horeca (Hôtel/Restaurant/Café) ou Retail
+
+2.  **Region** : Région des clients - Lisbonne, Porto ou Autre
+
+3.  **prodfrais** : Dépenses annuelles en produits frais
+
+4.  **prodlait** : Dépenses annuelles en produits laitiers
+
+5.  **prodepicerie**: Dépenses annuelles en produits d'épicerie
+
+6.  **prodsurgele** : Dépenses annuelles en produits surgelés
+
+7.  **proddetergents** : Dépenses annuelles en détergents et papier
+
+8.  **prodchacuterie** : Dépenses annuelles en produits de charcuterie
+
+```{r}
+#| echo: false
+# Convertir les colonnes 'team' et 'points' en facteurs
+data <- data %>% mutate(across(c(canal, Region), as.factor))
+str(data)
+```
+
+### Analyse des valeurs manquantes
+
+```{r}
+#| echo: false
+# Autres options avec naniar
+vis_miss(data)  # Vue d'ensemble des valeurs manquantes
+```
+
+### Visualisation des variables
+
+**La variables prodfrais**
+
+```{r}
+#| echo: false
+par(mfrow = c(1, 2))
+# Créer un boxplot pour les dépenses annuelles en produits frais
+ggplot(data, aes(y = prodfrais)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Boxplot des Dépenses Annuelles en Produits Frais",
+       y = "Dépenses en Produits Frais") +
+  theme_minimal()
+
+# Créer un graphique de densité pour les dépenses annuelles en produits frais
+ggplot(data, aes(x = prodfrais)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Densité des Dépenses Annuelles en Produits Frais",
+       x = "Dépenses en Produits Frais",
+       y = "Densité") +
+  theme_minimal()
+```
+
+**La variable prodlait**
+
+```{r}
+#| echo: false
+par(mfrow = c(1, 2))
+# Créer un boxplot pour les dépenses annuelles en produits frais
+ggplot(data, aes(y = prodlait)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Boxplot des Dépenses Annuelles en Produits Frais",
+       y = "Dépenses en Produits Frais") +
+  theme_minimal()
+
+# Créer un graphique de densité pour les dépenses annuelles en produits frais
+ggplot(data, aes(x = prodlait)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Densité des Dépenses Annuelles en Produits Frais",
+       x = "Dépenses en Produits Frais",
+       y = "Densité") +
+  theme_minimal()
+```
+
+**La variable prodepicerie**
+
+```{r}
+#| echo: false
+par(mfrow = c(1, 2))
+# Créer un boxplot pour les dépenses annuelles en produits frais
+ggplot(data, aes(y = prodepicerie)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Boxplot des Dépenses Annuelles en Produits Frais",
+       y = "Dépenses en Produits Frais") +
+  theme_minimal()
+
+# Créer un graphique de densité pour les dépenses annuelles en produits frais
+ggplot(data, aes(x = prodepicerie)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Densité des Dépenses Annuelles en Produits Frais",
+       x = "Dépenses en Produits Frais",
+       y = "Densité") +
+  theme_minimal()
+```
+
+**La variable prodsurgeles**
+
+```{r}
+#| echo: false
+par(mfrow = c(1, 2))
+# Créer un boxplot pour les dépenses annuelles en produits frais
+ggplot(data, aes(y = prodsurgele)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Boxplot des Dépenses Annuelles en Produits surgélés",
+       y = "Dépenses en Produits surgélés") +
+  theme_minimal()
+
+# Créer un graphique de densité pour les dépenses annuelles en produits frais
+ggplot(data, aes(x = prodsurgele)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Densité des Dépenses Annuelles en Produits surgélés",
+       x = "Dépenses en Produits Surgélés",
+       y = "Densité") +
+  theme_minimal()
+```
+
+**La variable proddetergents**
+
+```{r}
+#| echo: false
+par(mfrow = c(1, 2))
+# Créer un boxplot pour les dépenses annuelles en produits frais
+ggplot(data, aes(y = proddetergents)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Boxplot des Dépenses Annuelles en Produits Frais",
+       y = "Dépenses en Produits Frais") +
+  theme_minimal()
+
+# Créer un graphique de densité pour les dépenses annuelles en produits frais
+ggplot(data, aes(x = proddetergents)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Densité des Dépenses Annuelles en Produits Frais",
+       x = "Dépenses en Produits Frais",
+       y = "Densité") +
+  theme_minimal()
+```
+
+**La variables prodchacuterie**
+
+```{r}
+#| echo: false
+par(mfrow = c(1, 2))
+# Créer un boxplot pour les dépenses annuelles en produits frais
+ggplot(data, aes(y = prodchacuterie)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Boxplot des Dépenses Annuelles en Produits Frais",
+       y = "Dépenses en Produits Frais") +
+  theme_minimal()
+
+# Créer un graphique de densité pour les dépenses annuelles en produits frais
+ggplot(data, aes(x = prodchacuterie)) +  # Remplacez 'Fresh' par le nom de votre colonne de dépenses
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Densité des Dépenses Annuelles en Produits Frais",
+       x = "Dépenses en Produits Frais",
+       y = "Densité") +
+  theme_minimal()
+```
+
+**Le barplot des variables canal et région**
+
+```{r}
+#| echo: false
+par(mfrow=c(1,2))
+# Calculer les proportions
+data_summary <- data %>%
+  count(canal) %>%  # Compter les occurrences de chaque catégorie
+  mutate(proportion = n / sum(n))  # Calculer les proportions
+
+# Créer le barplot avec les proportions affichées
+ggplot(data_summary, aes(x = canal, y = proportion, fill = canal)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = scales::percent(proportion)), vjust = -0.5) +  # Ajouter les labels des proportions
+  labs(title = "Proportions des Catégories de Canal",
+       x = "Canal",
+       y = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Incliner les labels des axes x si nécessaire
+
+# Calculer les proportions
+data_summary <- data %>%
+  count(Region) %>%  # Compter les occurrences de chaque catégorie
+  mutate(proportion = n / sum(n))  # Calculer les proportions
+
+# Créer le barplot avec les proportions affichées
+ggplot(data_summary, aes(x = Region, y = proportion, fill = Region)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = scales::percent(proportion)), vjust = -0.5) +  # Ajouter les labels des proportions
+  labs(title = "Proportions des Catégories de Canal",
+       x = "Canal",
+       y = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Incliner les labels des axes x si nécessaire
+
+```
+
+```{r}
+#| echo: false
+# Sélectionner uniquement les variables numériques
+data_num <- data %>% select_if(is.numeric)
+
+# Calculer la matrice de corrélation
+cor_matrix <- cor(data_num, use = "pairwise.complete.obs")
+
+# Créer la heatmap de corrélation
+corrplot(cor_matrix, method = "color", type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45, addCoef.col = "black", 
+         number.cex = 0.7, col = colorRampPalette(c("#6D9EC1", "white", "#E46726"))(200))
+```
+
+```{r}
+# Supposons que votre base de données s'appelle 'data'
+# Normalisation de toutes les variables numériques
+data_normalized <- as.data.frame(scale(data_num))
+
+# Affichage des premières lignes de la base normalisée
+head(data_normalized)
+```
+
+```{r}
+#| echo: false
+# Créer une fonction de normalisation (z-score)
+normalize <- function(x) {
+  return((x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE))
+}
+
+# Normaliser les variables numériques en remplaçant les anciennes variables
+data_normalized <- data %>%
+  mutate(across(where(is.numeric), normalize))  # Normaliser les variables numériques
+
+# Afficher la nouvelle base de données avec les variables normalisées
+head(data_normalized)
+```
+
+```{r}
+#| echo: false
+# Supposons que votre base de données normalisée s'appelle data_normalized
+# Sélectionner uniquement les variables numériques pour l'ACP
+numeric_vars <- data_normalized %>%
+  select(where(is.numeric))
+
+# Effectuer l'ACP
+res.pca <- PCA(numeric_vars, scale.unit = TRUE, graph = FALSE)
+
+# Afficher un résumé des résultats de l'ACP
+summary(res.pca)
+
+# Visualiser les variables sur le plan factoriel
+fviz_pca_var(res.pca, col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+
+# Visualiser le Scree Plot (Graphique des valeurs propres) pour appliquer la règle du coude
+fviz_eig(res.pca, addlabels = TRUE, ylim = c(0, 100))
+```
+
+```{r}
+#| echo: false
+# Sélectionner uniquement les variables numériques
+numeric_vars <- data_normalized %>%
+  select(where(is.numeric))
+
+# Déterminer le nombre optimal de clusters avec la méthode du coude
+fviz_nbclust(numeric_vars, kmeans, method = "wss") + 
+  labs(subtitle = "Méthode du coude pour déterminer le nombre optimal de clusters")
+
+# Définir le nombre de clusters souhaité (par exemple, k = 3)
+set.seed(123)  # Pour la reproductibilité
+k <- 3  # Vous pouvez ajuster ce nombre selon la méthode du coude
+
+# Appliquer K-means
+kmeans_result <- kmeans(numeric_vars, centers = k, nstart = 25)
+
+# Afficher les résultats du clustering
+print(kmeans_result)
+
+# Ajouter les clusters à la base de données originale
+data_clustered <- data_normalized %>%
+  mutate(cluster = factor(kmeans_result$cluster))
+
+# Visualiser les clusters (premières deux dimensions principales)
+fviz_cluster(kmeans_result, data = numeric_vars)
+
+```
+
+```{r}
+#| echo: false
+# Sélectionner uniquement les variables numériques
+numeric_vars <- data_normalized %>%
+  select(where(is.numeric))
+
+# Déterminer le nombre optimal de clusters avec l'indice de silhouette
+fviz_nbclust(numeric_vars, kmeans, method = "silhouette") +
+  labs(subtitle = "Indice de silhouette pour déterminer le nombre optimal de clusters")
+
+# Définir le nombre de clusters souhaité (par exemple, k = 3)
+set.seed(123)  # Pour la reproductibilité
+k <- 3  # Ajustez ce nombre selon l'indice de silhouette
+
+# Appliquer K-means
+kmeans_result <- kmeans(numeric_vars, centers = k, nstart = 25)
+
+# Afficher les résultats du clustering
+print(kmeans_result)
+
+# Ajouter les clusters à la base de données originale
+data_clustered <- data_normalized %>%
+  mutate(cluster = factor(kmeans_result$cluster))
+
+# Visualiser les clusters (premières deux dimensions principales)
+fviz_cluster(kmeans_result, data = numeric_vars)
+
+```
