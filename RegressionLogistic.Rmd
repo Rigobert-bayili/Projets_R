@@ -1,0 +1,501 @@
+---
+title: "RegressionLogistic"
+output: 
+  word_document: 
+    toc: yes
+date: "2025-03-12"
+---
+
+```{r warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(gridExtra)
+library(corrplot)
+library(kableExtra)
+library(lmtest)
+library(pscl)
+library(flextable)
+library(caret)
+library(pROC)
+```
+
+# **Analyse des Risques des Maladies Cardiaques par la Régression Logistique**
+
+## **Introduction**
+
+Les maladies cardiovasculaires constituent aujourd'hui un enjeu majeur de santé publique, étant responsables d'un nombre important de décès à l'échelle mondiale. Elles englobent un large éventail de pathologies affectant le cœur et les vaisseaux sanguins, dont les principales causes incluent l'hypertension artérielle, l'hypercholestérolémie, le diabète, ainsi que des comportements à risque tels que le tabagisme, la sédentarité et une alimentation déséquilibrée. Face à cette problématique, il est crucial d'identifier les facteurs de risque afin de mieux cibler les populations vulnérables et mettre en place des stratégies de prévention adaptées.
+
+L'analyse statistique joue un rôle clé dans cette démarche, en permettant d'établir des relations entre les facteurs de risque et la survenue des maladies cardiaques. Parmi les approches utilisées, la régression logistique s'impose comme une méthode pertinente pour modéliser une variable binaire, en l'occurrence la présence ou l'absence d'une maladie cardiaque, en fonction d'un ensemble de variables explicatives. Ce modèle statistique permet non seulement d'estimer la probabilité d'occurrence de la maladie, mais également de quantifier l'influence relative de chaque facteur de risque.
+
+Ce travail s'inscrit dans cette perspective et vise à utiliser la régression logistique pour analyser les principaux facteurs contribuant aux maladies cardiaques. L'objectif est d'identifier les variables les plus significatives et d'évaluer leur impact sur la probabilité de développer une affection cardiovasculaire. Il est attendu que des facteurs tels que l'âge avancé, l'hypertension, un taux élevé de cholestérol, le diabète, le tabagisme et l'obésité soient significativement associés à un risque accru de maladies cardiaques. La régression logistique devrait permettre d'estimer leur effet individuel à travers les rapports de cotes (Odds Ratios), facilitant ainsi l'interprétation de leur contribution respective.
+
+Par ailleurs, l'évaluation du modèle devrait confirmer sa capacité à discriminer correctement les individus à risque, avec une bonne performance prédictive mesurée par des indicateurs tels que la précision et l'aire sous la courbe ROC (AUC). Enfin, les résultats de cette étude pourront avoir des implications importantes en matière de santé publique, en orientant les stratégies de prévention, le dépistage ciblé et l'amélioration des politiques de lutte contre les maladies cardiovasculaires.
+
+```{r}
+library(readr)
+data <- read.csv("C:/Users/HP X36O/Desktop/PROJETS PERSONELS/RegressionLogistic/data/heart.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+kable(head(data))
+```
+
+```{r}
+colnames(data)
+```
+
+```{r warning=FALSE}
+colnames(data) <- c(
+  "age",
+  "sexe",
+  "doulthoraxiq",
+  "tensionrepos",
+  "cholesterol",
+  "glycemiejeun",
+  "ElectroCardioRepos",
+  "Freqcardmax",
+  "AngineExercice",
+  "DepressionST",
+  "PenseST",
+  "MaladieCardiaque")
+```
+
+```{r}
+str(data)
+```
+
+```{r warning=FALSE}
+data$MaladieCardiaque <- factor(data$MaladieCardiaque)
+str(data)
+```
+
+```{r warning=TRUE}
+var_factor <- data[c("sexe","doulthoraxiq","ElectroCardioRepos", "PenseST","MaladieCardiaque")]
+var_num <- data [c("age","tensionrepos","cholesterol","glycemiejeun","Freqcardmax", "DepressionST")]
+```
+
+```{r}
+kable(summary(var_factor))
+kable(summary(var_num))
+```
+
+```{r}
+
+# Création et affichage des barplots avec ajustement de la taille
+for (var in names(var_factor)) {
+  df <- var_factor %>%
+    count(.data[[var]]) %>%
+    mutate(pct = (n / sum(n)) * 100)  # Calcul du pourcentage
+  
+  p <- ggplot(df, aes(x = .data[[var]], y = pct)) +
+    geom_bar(stat = "identity", fill = "blue", width = 0.4) +  # Ajustement de la largeur des barres
+    geom_text(aes(label = sprintf("%.1f%%", pct)), vjust = -0.4, size = 3.5) +  # Augmentation de la taille du texte
+    labs(title = paste("Histogramme de", var), x = var) +
+    theme_minimal(base_size = 10) +  # Ajustement de la taille générale du texte
+    theme(
+      panel.grid.major = element_blank(),  # Suppression des grandes lignes de 
+      panel.grid.minor = element_blank(),  # Suppression des petites lignes de 
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.y = element_blank(),  
+      axis.ticks.y = element_blank()
+    )
+  
+  print(p)  
+  Sys.sleep(1)  # Pause d'1 seconde (optionnel)
+}
+```
+
+```{r}
+
+# Liste des variables explicatives (exclure MaladieCardiaque)
+vars <- setdiff(names(var_factor), "MaladieCardiaque")
+
+# Initialiser un dataframe pour stocker les résultats
+resultats <- data.frame(Variable = character(),
+                        Chi2 = numeric(),
+                        P_value = numeric(),
+                        V_Cramer = numeric(),
+                        stringsAsFactors = FALSE)
+
+# Boucle pour calculer chi² et V de Cramer pour chaque variable
+for (var in vars) {
+  # Tableau de contingence
+  tableau <- table(var_factor[[var]], var_factor$MaladieCardiaque)
+  
+  # Test du chi²
+  test_chi2 <- chisq.test(tableau, correct = FALSE)  # Sans correction de continuité
+  
+  # Calcul du V de Cramer
+  n <- sum(tableau)  # Taille de l'échantillon
+  r <- nrow(tableau)  # Nombre de lignes
+  c <- ncol(tableau)  # Nombre de colonnes
+  chi2 <- test_chi2$statistic
+  v_cramer <- sqrt(chi2 / (n * (min(r, c) - 1)))
+  
+  # Ajouter les résultats au dataframe
+  resultats <- rbind(resultats, 
+                     data.frame(Variable = var,
+                                Chi2 = chi2,
+                                P_value = test_chi2$p.value,
+                                V_Cramer = v_cramer))
+}
+
+# Classer par V de Cramer décroissant
+resultats <- resultats[order(resultats$V_Cramer, decreasing = TRUE), ]
+
+# Afficher les résultats
+kable(resultats, main = "Les rélations entre les variables factorielles et la variable maladie cardiaque")
+```
+
+```{r}
+for (var in names(var_num)) {
+  p <- ggplot(var_num, aes(x = .data[[var]])) +
+    geom_density(fill = "lightblue", alpha = 0.5, color = "blue") +  # Courbe de densité
+    labs(title = paste("Courbe de densité de", var), x = var, y = "Densité") +
+    theme_minimal(base_size = 12) +
+    theme(
+      panel.grid.major = element_blank(),  # Suppression du quadrillage
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(hjust = 0.5, face = "bold") 
+    )
+  print(p)  
+  Sys.sleep(1)  # Pause d'1 seconde (optionnel)
+}
+```
+
+```{r}
+for (var in names(var_num)) {
+  p <- ggplot(var_num, aes(y = .data[[var]])) +
+    geom_boxplot(fill = "lightblue", color = "black", outlier.color = "red", width = 0.5) +  # Boxplot avec outliers en rouge
+    labs(title = paste("Boxplot de", var), y = var, x = NULL) +  # Suppression du titre de l'axe X
+    theme_minimal(base_size = 12) +  # Taille du texte ajustée
+    theme(
+      panel.grid.major = element_blank(),  # Suppression du quadrillage
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(hjust = 0.5, face = "bold")  # Centrage et mise en gras du titre
+    )
+  
+  print(p)  
+  Sys.sleep(1)  # Pause d'1 seconde (optionnel)
+}
+```
+
+```{r}
+# Calculer la matrice de corrélation
+matrice_cor <- cor(var_num, use = "complete.obs")
+```
+
+```{r}
+corrplot(matrice_cor,
+         method = "color",
+         type = "upper",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         diag = FALSE,
+         title = "La matrice de corrélation des variables numéribles de la base data ",
+         mar = c(0,0,1,0))
+kable(round(matrice_cor,2))
+```
+
+```{r}
+# Relation entre Age et HeartDisease
+boxplot(age ~ MaladieCardiaque, data=data, main="Âge vs Maladie cardiaque")
+boxplot(tensionrepos ~ MaladieCardiaque, data=data, main="Tension au repos vs Maladie cardiaque")
+boxplot(cholesterol ~ MaladieCardiaque, data=data, main="Le taux de cholestérol vs Maladie cardiaque")
+boxplot(glycemiejeun ~ MaladieCardiaque, data=data, main="Le taux de glycémie vs Maladie cardiaque")
+boxplot(Freqcardmax ~ MaladieCardiaque, data=data, main="La fréquence cardiaque vs Maladie cardiaque")
+boxplot(DepressionST ~ MaladieCardiaque, data=data, main=" Le nombre de dépression vs Maladie cardiaque")
+```
+
+```{r}
+# Initialiser un dataframe pour stocker les résultats
+resultats_normalite <- data.frame(Variable = character(),
+                                 Statistic = numeric(),
+                                 P_value = numeric(),
+                                 stringsAsFactors = FALSE)
+
+# Boucle pour tester la normalité de chaque variable
+for (var in colnames(var_num)) {
+  test <- shapiro.test(var_num[[var]])
+  resultats_normalite <- rbind(resultats_normalite,
+                              data.frame(Variable = var,
+                                        Statistic = test$statistic,
+                                        P_value = test$p.value))
+}
+
+# Arrondir pour plus de lisibilité
+resultats_normalite$Statistic <- round(resultats_normalite$Statistic, 3)
+resultats_normalite$P_value <- round(resultats_normalite$P_value, 4)
+
+# Interprétation simple
+resultats_normalite$Normalite <- ifelse(resultats_normalite$P_value > 0.05, 
+                                       "Normale", 
+                                       "Non normale")
+
+# Créer un tableau bien présenté avec kable
+kable_resultats <- kable(resultats_normalite, 
+                        format = "markdown",  # Pour console R ou Markdown
+                        caption = "Résultats du test de normalité (Shapiro-Wilk)",
+                        col.names = c("Variable", "Statistique", "P-value", "Normalité"),
+                        align = c("l", "c", "c", "c"))
+
+# Afficher le tableau
+print(kable_resultats)
+```
+
+```{r}
+var_num <- data [c("age","tensionrepos","cholesterol","glycemiejeun","Freqcardmax", "DepressionST","MaladieCardiaque")]
+var_num <- var_num[, sapply(var_num, is.numeric) | names(var_num) == "MaladieCardiaque"]  # Garde numériques + MaladieCardiaque
+
+# Initialiser un dataframe pour les résultats
+resultats_mann <- data.frame(Variable = character(),
+                            Statistic = numeric(),
+                            P_value = numeric(),
+                            stringsAsFactors = FALSE)
+
+# Effectuer le test de Mann-Whitney pour chaque variable numérique
+vars_num <- setdiff(colnames(var_num), "MaladieCardiaque")  # Exclure MaladieCardiaque
+for (var in vars_num) {
+  test <- wilcox.test(var_num[[var]] ~ var_num$MaladieCardiaque)
+  resultats_mann <- rbind(resultats_mann,
+                         data.frame(Variable = var,
+                                   Statistic = test$statistic,
+                                   P_value = test$p.value))
+}
+
+# Arrondir pour plus de lisibilité
+resultats_mann$Statistic <- round(resultats_mann$Statistic, 2)
+resultats_mann$P_value <- round(resultats_mann$P_value, 4)
+
+# Ajouter une interprétation
+resultats_mann$Difference <- ifelse(resultats_mann$P_value < 0.05, 
+                                   "Significative", 
+                                   "Non significative")
+
+# Créer un tableau avec kable
+kable(resultats_mann,
+      format = "simple",  # Pour copier-coller dans Word
+      caption = "Test de Mann-Whitney-Wilcoxon par rapport à MaladieCardiaque",
+      col.names = c("Variable", "Statistique (W)", "P-value", "Différence"),
+      align = c("l", "c", "c", "c"))
+```
+
+```{r}
+var_num <- data [c("age","tensionrepos","cholesterol","glycemiejeun","Freqcardmax", "DepressionST","MaladieCardiaque")]
+var_num <- var_num[, sapply(var_num, is.numeric) | names(var_num) == "MaladieCardiaque"]  # Garde numériques + MaladieCardiaque
+# Si MaladieCardiaque n'est pas en 0/1, la convertir
+var_num$MaladieCardiaque <- as.numeric(as.factor(var_num$MaladieCardiaque)) - 1  # Convertit en 0/1
+
+# Initialiser un dataframe pour les résultats
+resultats_pb <- data.frame(Variable = character(),
+                          Point_Biserial = numeric(),
+                          P_value = numeric(),
+                          stringsAsFactors = FALSE)
+
+# Calculer le coefficient point-bisérial pour chaque variable numérique
+vars_num <- setdiff(colnames(var_num), "MaladieCardiaque")  # Exclure MaladieCardiaque
+for (var in vars_num) {
+  # Coefficient point-bisérial avec cor.test
+  test <- cor.test(var_num[[var]], var_num$MaladieCardiaque, method = "pearson")
+  resultats_pb <- rbind(resultats_pb,
+                       data.frame(Variable = var,
+                                 Point_Biserial = test$estimate,
+                                 P_value = test$p.value))
+}
+
+# Arrondir pour plus de lisibilité
+resultats_pb$Point_Biserial <- round(resultats_pb$Point_Biserial, 3)
+resultats_pb$P_value <- round(resultats_pb$P_value, 4)
+
+# Classer par valeur absolue du coefficient (force de l'association)
+resultats_pb <- resultats_pb[order(abs(resultats_pb$Point_Biserial), decreasing = TRUE), ]
+
+# Ajouter une interprétation
+resultats_pb$Significativite <- ifelse(resultats_pb$P_value < 0.05, 
+                                      "Significative", 
+                                      "Non significative")
+
+# Créer un tableau avec kable
+kable(resultats_pb,
+      format = "simple",  # Pour copier-coller dans Word
+      caption = "Coefficient de Corrélation Point-Bisérial avec MaladieCardiaque",
+      col.names = c("Variable", "Point-Bisérial", "P-value", "Significativité"),
+      align = c("l", "c", "c", "c"))
+```
+
+```{r}
+# Convertir MaladieCardiaque en 0/1 si nécessaire
+data$MaladieCardiaque <- as.numeric(as.factor(data$MaladieCardiaque)) - 1
+
+# Ajuster le modèle de régression logistique
+formule <- as.formula(paste("MaladieCardiaque ~", paste(setdiff(names(data), "MaladieCardiaque"), collapse = " + ")))
+modele <- glm(formule, data = data, family = "binomial")
+
+# Extraire les coefficients et calculer les odds ratios
+resultats_reg <- as.data.frame(summary(modele)$coefficients)
+resultats_reg$Variable <- rownames(resultats_reg)
+colnames(resultats_reg) <- c("Coefficient", "Erreur_Std", "Z_value", "P_value", "Variable")
+resultats_reg <- resultats_reg[, c("Variable", "Coefficient", "Erreur_Std", "Z_value", "P_value")]
+
+# Calculer les odds ratios
+resultats_reg$Odds_Ratio <- round(exp(resultats_reg$Coefficient), 2)
+
+# Calculer les intervalles de confiance à 95 % pour les odds ratios
+conf_int <- confint(modele)  # Intervalles de confiance pour les coefficients
+resultats_reg$IC_Inf <- round(exp(conf_int[, 1]), 2)  # Borne inférieure
+resultats_reg$IC_Sup <- round(exp(conf_int[, 2]), 2)  # Borne supérieure
+
+# Arrondir les autres colonnes
+resultats_reg$Coefficient <- round(resultats_reg$Coefficient, 3)
+resultats_reg$Erreur_Std <- round(resultats_reg$Erreur_Std, 3)
+resultats_reg$Z_value <- round(resultats_reg$Z_value, 3)
+resultats_reg$P_value <- round(resultats_reg$P_value, 4)
+
+# Ajouter une interprétation
+resultats_reg$Significativite <- ifelse(resultats_reg$P_value < 0.05, "Significative", "Non significative")
+
+# Créer un tableau avec kable
+kable(resultats_reg[, c("Variable", "Coefficient", "Odds_Ratio", "IC_Inf", "IC_Sup", "P_value", "Significativite")],
+      format = "simple",  # Pour copier-coller dans Word
+      caption = "Régression logistique avec Odds Ratios et IC 95% pour MaladieCardiaque",
+      col.names = c("Variable", "Coefficient", "Odds Ratio", "IC Inf (95%)", "IC Sup (95%)", "P-value", "Significativité"),
+      align = c("l", "c", "c", "c", "c", "c", "c"))
+```
+
+```{r}
+# Test du rapport de vraisemblance
+lrtest(modele)
+
+# Pseudo R²
+Mac_fadden <- pR2(modele)
+
+# Construire un tableau pour les pseudo R²
+table <- data.frame(
+  Métrique = names(Mac_fadden),
+  Valeur = unlist(Mac_fadden)
+)
+
+cat("\n### Pseudo-R² de McFadden et autres\n")
+kable(table)
+
+```
+
+```{r warning=FALSE}
+# Probabilités prédites
+data$pred_prob <- predict(modele, type = "response")
+
+# Classes prédites (seuil par défaut de 0.5)
+data$pred_class <- ifelse(data$pred_prob > 0.5, 1, 0)
+
+# 2. Matrice de confusion
+# Convertir MaladieCardiaque et pred_class en facteurs pour caret
+data$MaladieCardiaque <- as.factor(data$MaladieCardiaque)
+data$pred_class <- as.factor(data$pred_class)
+matrice_confusion <- confusionMatrix(data$pred_class, data$MaladieCardiaque, positive = "1")
+print("Matrice de confusion :")
+print(matrice_confusion)
+
+# 3. Calcul de l'AUC et courbe ROC
+roc_obj <- roc(data$MaladieCardiaque, data$pred_prob)
+auc_value <- auc(roc_obj)
+print(paste("AUC :", round(auc_value, 3)))
+
+# 4. Tracer la courbe ROC
+plot(roc_obj, main = "Courbe ROC pour MaladieCardiaque", 
+     col = "blue", lwd = 2, print.auc = TRUE, 
+     auc.polygon = TRUE, auc.polygon.col = "lightblue", 
+     grid = TRUE)
+```
+
+## **Chapitre 1 : Revue de Littérature et Cadre Théorique**
+
+### **1.1 Définition des maladies cardiovasculaires**
+
+-   Types de maladies cardiaques.
+
+-   Facteurs de risque modifiables et non modifiables.
+
+### **1.2 Modélisation des risques en épidémiologie**
+
+-   Techniques courantes d'analyse statistique.
+
+-   Justification de l'utilisation de la régression logistique.
+
+### **1.3 La régression logistique**
+
+-   Formulation mathématique du modèle.
+
+-   Estimation des coefficients.
+
+-   Interprétation des coefficients en termes de rapport de cotes (Odds Ratio).
+
+```{r}
+```
+
+## **Chapitre 2 : Méthodologie de l'Étude**
+
+### **2.1 Présentation des données**
+
+-   Description du jeu de données `heart.csv`.
+
+-   Explication des variables (âge, pression artérielle, cholestérol, etc.).
+
+### **2.2 Préparation des données**
+
+-   Gestion des valeurs manquantes et des outliers.
+
+-   Normalisation et transformation des variables catégorielles.
+
+### **2.3 Construction du modèle de régression logistique**
+
+-   Séparation des données en ensemble d'entraînement et de test.
+
+-   Ajustement du modèle avec la variable cible (présence de maladie cardiaque).
+
+## **Chapitre 3 : Résultats et Interprétation**
+
+### **3.1 Résultats de l'ajustement du modèle**
+
+-   Présentation des coefficients estimés.
+
+-   Analyse des Odds Ratios.
+
+### **3.2 Évaluation de la performance du modèle**
+
+-   Matrice de confusion et précision du modèle.
+
+-   Courbe ROC et AUC.
+
+-   Analyse des erreurs de classification.
+
+### **3.3 Discussion des résultats**
+
+-   Comparaison avec la littérature existante.
+
+-   Interprétation des facteurs de risque les plus influents.
+
+## **Chapitre 4 : Discussion et Recommandations**
+
+### **4.1 Implications pour la prévention**
+
+-   Facteurs de risque modifiables.
+
+-   Stratégies de prévention basées sur les résultats.
+
+### **4.2 Limites de l'étude et perspectives**
+
+-   Limites méthodologiques et biais potentiels.
+
+-   Possibilités d'amélioration du modèle.
+
+-   Perspectives pour des recherches futures.
+
+## **Conclusion Générale**
+
+-   Synthèse des principaux résultats.
+
+-   Réponse à la problématique.
+
+-   Importance des analyses statistiques pour la santé publique.
